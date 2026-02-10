@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Repository {
+  id            String   @id @default(cuid())
+  name          String
+  fullName      String   @unique
+  webhookSecret String?
+  rules         String?
+  createdAt     DateTime @default(now())
+
+  pullRequests PullRequest[]
+
+  @@map("repositories")
+}
+
+model PullRequest {
+  id        String   @id @default(cuid())
+  repoId    String
+  number    Int
+  title     String
+  author    String
+  url       String
+  status    String   @default("open")
+  createdAt DateTime @default(now())
+
+  repository Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  reviews    Review[]
+
+  @@unique([repoId, number])
+  @@map("pull_requests")
+}
+
+model Review {
+  id          String    @id @default(cuid())
+  prId        String
+  status      String    @default("pending")
+  startedAt   DateTime?
+  completedAt DateTime?
+  summary     String?
+  tokensUsed  Int?
+
+  pullRequest PullRequest     @relation(fields: [prId], references: [id], onDelete: Cascade)
+  comments    ReviewComment[]
+
+  @@map("reviews")
+}
+
+model ReviewComment {
+  id       String @id @default(cuid())
+  reviewId String
+  filePath String
+  line     Int
+  body     String
+  category String
+  severity String
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("review_comments")
+}
