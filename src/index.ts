@@ -10,6 +10,7 @@ import { statsRoutes } from "./routes/stats";
 import { authRoutes } from "./routes/auth";
 import { githubAuthRoutes } from "./routes/githubAuth";
 import { requireAuth } from "./middleware/auth";
+import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -40,17 +41,7 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/stats", statsRoutes);
 
 // Error handler
-app.use(
-  (
-    err: Error,
-    _req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
-  ) => {
-    console.error("Unhandled error:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-);
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`🚀 CodeReview Hub API running on http://localhost:${PORT}`);
