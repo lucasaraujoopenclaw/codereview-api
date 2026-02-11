@@ -8,8 +8,17 @@ export const reviewRoutes = Router();
 reviewRoutes.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    const review = await prisma.review.findUnique({
-      where: { id: req.params.id },
+    const userId = req.user!.userId;
+
+    const review = await prisma.review.findFirst({
+      where: {
+        id: req.params.id,
+        pullRequest: {
+          repository: {
+            userId,
+          },
+        },
+      },
       include: {
         pullRequest: {
           include: {

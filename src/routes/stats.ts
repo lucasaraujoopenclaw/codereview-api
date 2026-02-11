@@ -8,7 +8,9 @@ export const statsRoutes = Router();
 // GET /api/stats — aggregated metrics
 statsRoutes.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.userId;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -20,20 +22,39 @@ statsRoutes.get(
       categoryStats,
       severityStats,
     ] = await Promise.all([
-      prisma.repository.count(),
-      prisma.pullRequest.count(),
-      prisma.review.count(),
+      prisma.repository.count({ where: { userId } }),
+      prisma.pullRequest.count({ where: { repository: { userId } } }),
+      prisma.review.count({ where: { pullRequest: { repository: { userId } } } }),
       prisma.review.count({
         where: {
           startedAt: { gte: today },
+          pullRequest: { repository: { userId } },
         },
       }),
       prisma.reviewComment.groupBy({
         by: ["category"],
+        where: {
+          review: {
+            pullRequest: {
+              repository: {
+                userId,
+              },
+            },
+          },
+        },
         _count: { id: true },
       }),
       prisma.reviewComment.groupBy({
         by: ["severity"],
+        where: {
+          review: {
+            pullRequest: {
+              repository: {
+                userId,
+              },
+            },
+          },
+        },
         _count: { id: true },
       }),
     ]);

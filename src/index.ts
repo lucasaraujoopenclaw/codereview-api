@@ -7,6 +7,9 @@ import { pullRequestRoutes } from "./routes/pullRequests";
 import { reviewRoutes } from "./routes/reviews";
 import { webhookRoutes } from "./routes/webhooks";
 import { statsRoutes } from "./routes/stats";
+import { authRoutes } from "./routes/auth";
+import { githubAuthRoutes } from "./routes/githubAuth";
+import { requireAuth } from "./middleware/auth";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,7 +26,14 @@ app.get("/health", (_req, res) => {
 });
 
 // Routes
+app.use("/auth", authRoutes);
+app.use(githubAuthRoutes);
+
 app.use("/webhooks", webhookRoutes);
+
+// Protect all /api/* routes
+app.use("/api", requireAuth);
+
 app.use("/api/repositories", repositoryRoutes);
 app.use("/api/pull-requests", pullRequestRoutes);
 app.use("/api/reviews", reviewRoutes);

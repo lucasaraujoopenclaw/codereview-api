@@ -8,6 +8,8 @@ export const pullRequestRoutes = Router();
 pullRequestRoutes.get(
   "/",
   asyncHandler(async (req, res) => {
+    const userId = req.user!.userId;
+
     const {
       repoId,
       status,
@@ -20,7 +22,9 @@ pullRequestRoutes.get(
     const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      repository: { userId },
+    };
     if (repoId) where.repoId = repoId;
     if (status) where.status = status;
     if (author) where.author = { contains: author };
@@ -57,8 +61,13 @@ pullRequestRoutes.get(
 pullRequestRoutes.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    const pullRequest = await prisma.pullRequest.findUnique({
-      where: { id: req.params.id },
+    const userId = req.user!.userId;
+
+    const pullRequest = await prisma.pullRequest.findFirst({
+      where: {
+        id: req.params.id,
+        repository: { userId },
+      },
       include: {
         repository: true,
         reviews: {

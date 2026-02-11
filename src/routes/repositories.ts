@@ -15,8 +15,11 @@ const createRepoSchema = z.object({
 // GET /api/repositories — list all repositories
 repositoryRoutes.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.userId;
+
     const repositories = await prisma.repository.findMany({
+      where: { userId },
       orderBy: { createdAt: "desc" },
       include: {
         _count: {
@@ -32,6 +35,8 @@ repositoryRoutes.get(
 repositoryRoutes.post(
   "/",
   asyncHandler(async (req, res) => {
+    const userId = req.user!.userId;
+
     const parsed = createRepoSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new AppError(400, parsed.error.errors[0].message);
@@ -46,7 +51,10 @@ repositoryRoutes.post(
     }
 
     const repository = await prisma.repository.create({
-      data: parsed.data,
+      data: {
+        ...parsed.data,
+        userId,
+      },
     });
 
     res.status(201).json(repository);
@@ -57,8 +65,10 @@ repositoryRoutes.post(
 repositoryRoutes.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    const repository = await prisma.repository.findUnique({
-      where: { id: req.params.id },
+    const userId = req.user!.userId;
+
+    const repository = await prisma.repository.findFirst({
+      where: { id: req.params.id, userId },
       include: {
         pullRequests: {
           orderBy: { createdAt: "desc" },
@@ -79,9 +89,16 @@ repositoryRoutes.get(
 repositoryRoutes.delete(
   "/:id",
   asyncHandler(async (req, res) => {
-    await prisma.repository.delete({
-      where: { id: req.params.id },
+    const userId = req.user!.userId;
+
+    const deleted = await prisma.repository.deleteMany({
+      where: { id: req.params.id, userId },
     });
+
+    if (deleted.count === 0) {
+      throw new AppError(404, "Repository not found");
+    }
+
     res.status(204).send();
   })
 );
