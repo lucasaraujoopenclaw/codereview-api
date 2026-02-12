@@ -269,6 +269,11 @@ githubAuthRoutes.post("/api/github/repos/enable", requireAuth, async (req: Reque
     throw new AppError(400, "GitHub not connected");
   }
 
+  const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL
+    || (process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : "https://api-production-6121.up.railway.app");
+
   try {
     // Verify repo exists on GitHub
     const repoResponse = await githubFetch(
@@ -277,17 +282,56 @@ githubAuthRoutes.post("/api/github/repos/enable", requireAuth, async (req: Reque
     );
     const repoData = await repoResponse.json();
 
+    // Generate webhook secret
+    const webhookSecret = crypto.randomBytes(32).toString("hex");
+
+    // Create webhook on GitHub
+    const webhookUrl = `${WEBHOOK_BASE_URL}/webhooks/github`;
+    let webhookId: number | null = null;
+
+    try {
+      const webhookResponse = await githubFetch(
+        `https://api.github.com/repos/${repoFullName}/hooks`,
+        connection.accessToken,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "web",
+            active: true,
+            events: ["pull_request"],
+            config: {
+              url: webhookUrl,
+              content_type: "json",
+              secret: webhookSecret,
+              insecure_ssl: "0",
+            },
+          }),
+        }
+      );
+      const webhookData = await webhookResponse.json();
+      webhookId = webhookData.id;
+      console.log(`✅ Webhook created for ${repoFullName} (id: ${webhookId})`);
+    } catch (err) {
+      console.error(`⚠️ Failed to create webhook for ${repoFullName}:`, err);
+      // Continue anyway — user might not have admin rights, or webhook already exists
+    }
+
     // Create or return existing repository
     const repository = await prisma.repository.upsert({
       where: { fullName: repoData.full_name },
       update: {
         userId,
         name: repoData.name,
+        webhookSecret,
+        webhookId: webhookId ? String(webhookId) : null,
       },
       create: {
         userId,
         name: repoData.name,
         fullName: repoData.full_name,
+        webhookSecret,
+        webhookId: webhookId ? String(webhookId) : null,
       },
     });
 
@@ -313,6 +357,28 @@ githubAuthRoutes.delete("/api/github/repos/:id/disable", requireAuth, async (req
 
   if (!repository) {
     throw new AppError(404, "Repository not found");
+  }
+
+  // Try to remove webhook from GitHub
+  if (repository.webhookId) {
+    try {
+      const connection = await prisma.gitHubConnection.findFirst({
+        where: { userId },
+      });
+
+      if (connection) {
+        await githubFetch(
+          `https://api.github.com/repos/${repository.fullName}/hooks/${repository.webhookId}`,
+          connection.accessToken,
+          { method: "DELETE" }
+        ).catch(() => {
+          // Ignore — webhook might already be gone
+        });
+        console.log(`🗑️ Webhook removed for ${repository.fullName}`);
+      }
+    } catch {
+      // Best-effort cleanup
+    }
   }
 
   await prisma.repository.delete({

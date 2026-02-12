@@ -19,6 +19,19 @@ const PORT = process.env.PORT || 3001;
 app.use(helmet());
 app.use(cors());
 app.use(morgan("dev"));
+
+// Webhook route needs raw body for HMAC verification — must be before express.json()
+app.use(
+  "/webhooks",
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+  webhookRoutes
+);
+
+// JSON parser for all other routes
 app.use(express.json());
 
 // Health check
@@ -29,8 +42,6 @@ app.get("/health", (_req, res) => {
 // Routes
 app.use("/auth", authRoutes);
 app.use(githubAuthRoutes);
-
-app.use("/webhooks", webhookRoutes);
 
 // Protect all /api/* routes
 app.use("/api", requireAuth);

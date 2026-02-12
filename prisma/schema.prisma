@@ -45,6 +45,7 @@ model Repository {
   name          String
   fullName      String   @unique
   webhookSecret String?
+  webhookId     String?
   rules         String?
   createdAt     DateTime @default(now())
 
