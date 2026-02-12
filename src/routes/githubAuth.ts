@@ -277,9 +277,14 @@ githubAuthRoutes.post("/api/github/repos/enable", requireAuth, async (req: Reque
     );
     const repoData = await repoResponse.json();
 
-    // Create repository in database
-    const repository = await prisma.repository.create({
-      data: {
+    // Create or return existing repository
+    const repository = await prisma.repository.upsert({
+      where: { fullName: repoData.full_name },
+      update: {
+        userId,
+        name: repoData.name,
+      },
+      create: {
         userId,
         name: repoData.name,
         fullName: repoData.full_name,
