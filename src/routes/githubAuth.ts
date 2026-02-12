@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import jwt from "jsonwebtoken";
 import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { prisma } from "../services/prisma";
@@ -43,14 +44,37 @@ async function githubFetch(url: string, accessToken: string, options: RequestIni
 }
 
 // GET /auth/github — redirect to GitHub OAuth
-githubAuthRoutes.get("/auth/github", requireAuth, (req: Request, res: Response) => {
+githubAuthRoutes.get("/auth/github", (req: Request, res: Response) => {
   const { GITHUB_CLIENT_ID, GITHUB_CALLBACK_URL } = process.env;
 
   if (!GITHUB_CLIENT_ID || !GITHUB_CALLBACK_URL) {
     throw new AppError(500, "GitHub OAuth not configured");
   }
 
-  const userId = req.user!.userId;
+  // Accept token via query param (browser redirect) or Authorization header
+  const queryToken = req.query.token as string | undefined;
+  const headerToken = req.headers.authorization?.startsWith("Bearer ")
+    ? req.headers.authorization.substring(7)
+    : undefined;
+  const token = queryToken || headerToken;
+
+  if (!token) {
+    throw new AppError(401, "Missing authentication token");
+  }
+
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new AppError(500, "JWT_SECRET not configured");
+  }
+
+  let payload: { userId: string; email: string };
+  try {
+    payload = jwt.verify(token, jwtSecret) as { userId: string; email: string };
+  } catch {
+    throw new AppError(401, "Invalid token");
+  }
+
+  const userId = payload.userId;
   const state = crypto.randomUUID();
 
   // Store state with userId for validation in callback
