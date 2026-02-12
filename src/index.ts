@@ -9,6 +9,7 @@ import { webhookRoutes } from "./routes/webhooks";
 import { statsRoutes } from "./routes/stats";
 import { authRoutes } from "./routes/auth";
 import { githubAuthRoutes } from "./routes/githubAuth";
+import { settingsRoutes } from "./routes/settings";
 import { requireAuth } from "./middleware/auth";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -67,6 +68,7 @@ app.use("/api/repositories", repositoryRoutes);
 app.use("/api/pull-requests", pullRequestRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/stats", statsRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Error handler
 app.use(errorHandler);

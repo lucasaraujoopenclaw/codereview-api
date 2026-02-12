@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import type { ReviewStatus, CommentCategory, CommentSeverity } from "../shared";
 
 interface ReviewContext {
+  prId: string;
   repoFullName: string;
   prNumber: number;
   accessToken: string;
@@ -24,6 +25,34 @@ interface DiffFile {
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+async function resolveOpenAIApiKeyForReview(prId: string): Promise<string | undefined> {
+  // Prefer per-user stored key (if configured). Fallback to server key.
+  const pr = await prisma.pullRequest.findUnique({
+    where: { id: prId },
+    include: {
+      repository: {
+        include: {
+          user: {
+            select: {
+              openaiApiKeyEnc: true,
+              openaiApiKeyIv: true,
+              openaiApiKeyTag: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const u = pr?.repository?.user;
+  if (u?.openaiApiKeyEnc && u?.openaiApiKeyIv && u?.openaiApiKeyTag) {
+    const { decryptString } = await import("./crypto");
+    return decryptString({ enc: u.openaiApiKeyEnc, iv: u.openaiApiKeyIv, tag: u.openaiApiKeyTag });
+  }
+
+  return process.env.OPENAI_API_KEY;
+}
 
 async function githubFetch(url: string, accessToken: string, options: RequestInit = {}) {
   const response = await fetch(url, {
@@ -48,7 +77,7 @@ export class ReviewService {
   /**
    * Trigger a full AI review: fetch diff → analyze → post comments on GitHub
    */
-  static async triggerReview(prId: string, ctx: ReviewContext): Promise<string> {
+  static async triggerReview(prId: string, ctx: Omit<ReviewContext, "prId">): Promise<string> {
     const review = await prisma.review.create({
       data: {
         prId,
@@ -58,7 +87,7 @@ export class ReviewService {
     });
 
     // Run async — don't block webhook response
-    this.processReview(review.id, ctx).catch((err) => {
+    this.processReview(review.id, { ...ctx, prId }).catch((err) => {
       console.error(`❌ Review ${review.id} failed:`, err);
     });
 
@@ -221,7 +250,10 @@ Respond ONLY with valid JSON in this exact format:
 If the code looks good and you have no issues to report, return:
 { "summary": "Code looks good. No significant issues found.", "comments": [] }`;
 
-    const response = await openai.chat.completions.create({
+    const apiKey = await resolveOpenAIApiKeyForReview(ctx.prId);
+    const client = apiKey ? new OpenAI({ apiKey }) : openai;
+
+    const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
