@@ -36,7 +36,24 @@ app.use(express.json());
 
 // Health check
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    marker: "webhook-enable-v2",
+  });
+});
+
+// Version/debug
+app.get("/version", (_req, res) => {
+  res.json({
+    marker: "webhook-enable-v2",
+    nodeEnv: process.env.NODE_ENV,
+    railway: {
+      environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+      service: process.env.RAILWAY_SERVICE_NAME,
+      domain: process.env.RAILWAY_PUBLIC_DOMAIN,
+    },
+  });
 });
 
 // Routes
