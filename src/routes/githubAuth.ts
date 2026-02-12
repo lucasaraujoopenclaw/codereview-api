@@ -36,11 +36,87 @@ async function githubFetch(url: string, accessToken: string, options: RequestIni
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`GitHub API error (${response.status}):`, errorText);
-    throw new Error(`GitHub API error: ${response.status}`);
+    console.error(`GitHub API error (${response.status}) ${options.method || "GET"} ${url}:`, errorText);
+    const err = new Error(`GitHub API error: ${response.status} ${errorText.substring(0, 300)}`);
+    (err as any).status = response.status;
+    (err as any).body = errorText;
+    throw err;
   }
 
   return response;
+}
+
+async function ensurePullRequestWebhook(params: {
+  repoFullName: string;
+  accessToken: string;
+  webhookUrl: string;
+  webhookSecret: string;
+}): Promise<number> {
+  const { repoFullName, accessToken, webhookUrl, webhookSecret } = params;
+
+  // 1) Try create
+  try {
+    const createRes = await githubFetch(
+      `https://api.github.com/repos/${repoFullName}/hooks`,
+      accessToken,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "web",
+          active: true,
+          events: ["pull_request"],
+          config: {
+            url: webhookUrl,
+            content_type: "json",
+            secret: webhookSecret,
+            insecure_ssl: "0",
+          },
+        }),
+      }
+    );
+
+    const webhookData = await createRes.json();
+    return webhookData.id as number;
+  } catch (err: any) {
+    // 2) If already exists (422), find existing one by URL and update secret
+    if (err?.status === 422) {
+      const listRes = await githubFetch(
+        `https://api.github.com/repos/${repoFullName}/hooks`,
+        accessToken
+      );
+      const hooks = (await listRes.json()) as any[];
+
+      const existing = hooks.find((h) => h?.config?.url === webhookUrl);
+      if (!existing?.id) {
+        throw err;
+      }
+
+      // Update hook to ensure it has our secret + pull_request event
+      await githubFetch(
+        `https://api.github.com/repos/${repoFullName}/hooks/${existing.id}`,
+        accessToken,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            active: true,
+            events: ["pull_request"],
+            config: {
+              url: webhookUrl,
+              content_type: "json",
+              secret: webhookSecret,
+              insecure_ssl: "0",
+            },
+          }),
+        }
+      );
+
+      return existing.id as number;
+    }
+
+    throw err;
+  }
 }
 
 // GET /auth/github — redirect to GitHub OAuth
@@ -285,57 +361,49 @@ githubAuthRoutes.post("/api/github/repos/enable", requireAuth, async (req: Reque
     // Generate webhook secret
     const webhookSecret = crypto.randomBytes(32).toString("hex");
 
-    // Create webhook on GitHub
+    // Create/ensure webhook on GitHub
     const webhookUrl = `${WEBHOOK_BASE_URL}/webhooks/github`;
-    let webhookId: number | null = null;
 
+    let webhookId: number;
     try {
-      const webhookResponse = await githubFetch(
-        `https://api.github.com/repos/${repoFullName}/hooks`,
-        connection.accessToken,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: "web",
-            active: true,
-            events: ["pull_request"],
-            config: {
-              url: webhookUrl,
-              content_type: "json",
-              secret: webhookSecret,
-              insecure_ssl: "0",
-            },
-          }),
-        }
-      );
-      const webhookData = await webhookResponse.json();
-      webhookId = webhookData.id;
-      console.log(`✅ Webhook created for ${repoFullName} (id: ${webhookId})`);
+      webhookId = await ensurePullRequestWebhook({
+        repoFullName,
+        accessToken: connection.accessToken,
+        webhookUrl,
+        webhookSecret,
+      });
+      console.log(`✅ Webhook ensured for ${repoFullName} (id: ${webhookId}) -> ${webhookUrl}`);
     } catch (err) {
-      console.error(`⚠️ Failed to create webhook for ${repoFullName}:`, err);
-      // Continue anyway — user might not have admin rights, or webhook already exists
+      console.error(`❌ Failed to ensure webhook for ${repoFullName}:`, err);
+      // Do NOT silently continue — this is critical for the product to work.
+      throw new AppError(
+        500,
+        `Falha ao configurar webhook no GitHub. Verifique se você tem permissão de admin no repositório e tente novamente.`
+      );
     }
 
-    // Create or return existing repository
+    // Create or update repository record
     const repository = await prisma.repository.upsert({
       where: { fullName: repoData.full_name },
       update: {
         userId,
         name: repoData.name,
         webhookSecret,
-        webhookId: webhookId ? String(webhookId) : null,
+        webhookId: String(webhookId),
       },
       create: {
         userId,
         name: repoData.name,
         fullName: repoData.full_name,
         webhookSecret,
-        webhookId: webhookId ? String(webhookId) : null,
+        webhookId: String(webhookId),
       },
     });
 
-    res.status(201).json(repository);
+    res.status(201).json({
+      ...repository,
+      webhookUrl,
+    });
   } catch (error) {
     console.error("Error enabling repository:", error);
     if (error instanceof Error && error.message.includes("404")) {
